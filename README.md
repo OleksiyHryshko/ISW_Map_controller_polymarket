@@ -73,11 +73,12 @@ cd filterbot
 
 **2. Set up environment variables:**
 ```bash
-# Telegram Configuration
+# Telegram
 export TELEGRAM_API_ID=your_telegram_api_id
 export TELEGRAM_API_HASH=your_telegram_api_hash
 export BOT_API=your_bot_token_from_botfather
-export CHAT_ID=your_telegram_chat_id
+export BOT_USERNAME=your_bot_username          # without @, e.g. my_radar_bot
+export BOT_ALLOWED_CHAT_IDS=123456789          # comma-separated Telegram chat IDs
 
 # Google APIs
 export GEMINI_API_KEY=your_google_gemini_api_key
@@ -107,7 +108,8 @@ Create a `.env` file in the project root (excluded from git):
 TELEGRAM_API_ID=your_value
 TELEGRAM_API_HASH=your_value
 BOT_API=your_value
-CHAT_ID=your_value
+BOT_USERNAME=your_bot_username
+BOT_ALLOWED_CHAT_IDS=your_chat_id
 GEMINI_API_KEY=your_value
 GOOGLE_SHEETS_SPREADSHEET_ID=your_value
 ```

@@ -4,6 +4,7 @@ import com.example.filterbot.model.TargetInfo;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -15,8 +16,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Service
 public class GeminiParser {
+
+    private static final String GEMINI_BASE_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/";
+
+    private static final String[] FALLBACK_MODELS = {
+            "gemini-2.5-flash-lite",
+            "gemini-1.5-flash-8b",
+            "gemini-2.5-flash"
+    };
 
     @Value("${gemini.api.key}")
     private String apiKey;
@@ -24,18 +35,10 @@ public class GeminiParser {
     private final HttpClient client = HttpClient.newHttpClient();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    private final String[] fallbackModels = {
-            "gemini-2.5-flash-lite",
-            "gemini-1.5-flash-8b",
-            "gemini-2.5-flash"
-    };
-
     public List<TargetInfo> parseBatch(List<String> dataList) {
         if (dataList == null || dataList.isEmpty()) return new ArrayList<>();
 
         String combinedData = String.join("\n\n", dataList);
-
-        // Prompt asks Gemini to extract location + deadline and return strict JSON
         String prompt = "You are a precise geographic and temporal JSON API. I will give you a list of prediction market events (Title + Description). " +
                 "1. Extract the target city/region and its exact GPS coordinates. " +
                 "2. Extract the deadline date/time from the description and convert it to a UNIX timestamp in MILLISECONDS. " +
@@ -44,25 +47,18 @@ public class GeminiParser {
                 "If no clear city is found, ignore it. \nEvents:\n" + combinedData;
 
         try {
-            Map<String, Object> bodyMap = Map.of(
-                    "contents", List.of(
-                            Map.of("parts", List.of(
-                                    Map.of("text", prompt)
-                            ))
-                    )
-            );
-            String requestBody = mapper.writeValueAsString(bodyMap);
+            String requestBody = mapper.writeValueAsString(Map.of(
+                    "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt))))
+            ));
 
-            for (String modelName : fallbackModels) {
+            for (String modelName : FALLBACK_MODELS) {
                 try {
-
-                        String fullUrl = "https://generativelanguage.googleapis.com/v1beta/models/" + modelName + ":generateContent?key=" + apiKey;
-
-                        HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create(fullUrl))
-                                .header("Content-Type", "application/json")
-                                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                                .build();
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(URI.create(GEMINI_BASE_URL + modelName + ":generateContent"))
+                            .header("Content-Type", "application/json")
+                            .header("x-goog-api-key", apiKey)
+                            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                            .build();
 
                     HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -71,25 +67,22 @@ public class GeminiParser {
                         continue;
                     }
 
-                    JsonNode rootNode = mapper.readTree(response.body());
-                    JsonNode candidates = rootNode.path("candidates");
-
+                    JsonNode candidates = mapper.readTree(response.body()).path("candidates");
                     if (candidates.isMissingNode() || candidates.isEmpty()) continue;
 
                     String jsonText = candidates.get(0).path("content").path("parts").get(0).path("text").asText();
                     jsonText = jsonText.replace("```json", "").replace("```", "").trim();
 
-                    List<TargetInfo> results = mapper.readValue(jsonText, new TypeReference<List<TargetInfo>>() {});
-                    return results;
+                    return mapper.readValue(jsonText, new TypeReference<List<TargetInfo>>() {});
 
                 } catch (Exception e) {
-                    System.err.println("Request error for " + modelName + ": " + e.getMessage());
+                    log.warn("Gemini request failed for model {}: {}", modelName, e.getMessage());
                 }
             }
             return new ArrayList<>();
 
         } catch (Exception e) {
-            System.err.println("JSON generation error: " + e.getMessage());
+            log.error("Failed to build Gemini request", e);
             return new ArrayList<>();
         }
     }

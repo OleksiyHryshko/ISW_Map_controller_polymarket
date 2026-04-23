@@ -1,5 +1,6 @@
-HELP.md
 target/
+
+# Maven wrapper jar (downloaded on first build)
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

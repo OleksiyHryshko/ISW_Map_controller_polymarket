@@ -4,6 +4,7 @@ import com.example.filterbot.bot.Commands;
 import com.example.filterbot.model.TargetInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -11,11 +12,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.*;
 import java.text.SimpleDateFormat;
+import java.util.*;
 
+@Slf4j
 @Service
 public class MarketScanner {
+
+    private static final String[] SEARCH_TAGS = {"Russia", "Ukraine", "Putin", "Europe"};
 
     private final GeminiParser gemini;
     private final Commands telegram;
@@ -37,14 +41,12 @@ public class MarketScanner {
 
     @Scheduled(fixedRate = 6 * 3600000)
     public void scanNewMarkets() {
-        System.out.println("Polymarket radar is active. Searching for new markets...");
+        log.info("Scanning Polymarket for new markets...");
 
-        // Wider search: include related tags
-        String[] tags = {"Russia", "Ukraine", "Putin", "Europe"};
         Map<String, PendingMarket> pendingMarkets = new HashMap<>();
 
         try {
-            for (String tag : tags) {
+            for (String tag : SEARCH_TAGS) {
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create("https://gamma-api.polymarket.com/events?tag_slug=" + tag + "&active=true&closed=false"))
                         .GET().build();
@@ -65,7 +67,6 @@ public class MarketScanner {
                         String title = market.path("question").asText();
                         String desc = market.path("description").asText();
 
-                        // Filter by keywords to reduce noise
                         if ((title.toLowerCase().contains("capture") || desc.toLowerCase().contains("isw"))
                                 && !knownMarkets.contains(marketId)) {
 
@@ -75,7 +76,9 @@ public class MarketScanner {
                                 if (tokensArray.isArray() && !tokensArray.isEmpty()) {
                                     yesTokenId = tokensArray.get(0).asText();
                                 }
-                            } catch (Exception ex) {}
+                            } catch (Exception ex) {
+                                log.debug("Could not parse clobTokenIds for market {}", marketId);
+                            }
 
                             PendingMarket pm = new PendingMarket();
                             pm.eventSlug = eventSlug;
@@ -88,59 +91,60 @@ public class MarketScanner {
                 }
             }
 
-            if (!pendingMarkets.isEmpty()) {
-                System.out.println("New candidate markets found: " + pendingMarkets.size() + ". Sending to AI...");
-
-                List<String> promptData = new ArrayList<>();
-                for (Map.Entry<String, PendingMarket> entry : pendingMarkets.entrySet()) {
-                    String cleanDesc = entry.getValue().description.replace("\n", " ");
-                    promptData.add("Title: " + entry.getKey() + " | Description: " + cleanDesc);
-                }
-
-                List<TargetInfo> aiResults = gemini.parseBatch(promptData);
-
-                for (TargetInfo target : aiResults) {
-                    PendingMarket pm = pendingMarkets.get(target.title.replace("Title: ", ""));
-
-                    if (pm == null) {
-                        for (String key : pendingMarkets.keySet()) {
-                            if (key.contains(target.title) || target.title.contains(key)) {
-                                pm = pendingMarkets.get(key);
-                                break;
-                            }
-                        }
-                    }
-
-                    if (pm != null) {
-                        String cityName = target.city.replaceAll("\\s+", "_");
-                        String marketUrl = "https://polymarket.com/event/" + pm.eventSlug;
-                        SimpleDateFormat sdf = new SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US);
-                        String humanReadableDate = sdf.format(new Date(target.deadline));
-                        String alert = String.format(
-                                "New Polymarket market detected!\n" +
-                                        "Location: %s\n" +
-                                        "Coordinates: %s, %s\n" +
-                                        "Deadline: **%s**\n" +
-                                        "[Event link](%s)\n\n" +
-                                        "To add it to radar, send this command:\n" +
-                                        "`/add %s %s %s %s %d`",
-                                cityName, target.lat, target.lon, humanReadableDate, marketUrl,
-                                cityName, target.lat, target.lon, pm.yesTokenId, target.deadline
-                        );
-                        telegram.sendAlertToAll(alert);
-                        knownMarkets.add(pm.marketId);
-                    }
-                }
-
-                for (PendingMarket pm : pendingMarkets.values()) {
-                    knownMarkets.add(pm.marketId);
-                }
-            } else {
-                System.out.println("No new markets found.");
+            if (pendingMarkets.isEmpty()) {
+                log.info("No new markets found.");
+                return;
             }
 
+            log.info("Found {} candidate markets. Sending to AI...", pendingMarkets.size());
+
+            List<String> promptData = new ArrayList<>();
+            for (Map.Entry<String, PendingMarket> entry : pendingMarkets.entrySet()) {
+                String cleanDesc = entry.getValue().description.replace("\n", " ");
+                promptData.add("Title: " + entry.getKey() + " | Description: " + cleanDesc);
+            }
+
+            List<TargetInfo> aiResults = gemini.parseBatch(promptData);
+
+            for (TargetInfo target : aiResults) {
+                PendingMarket pm = pendingMarkets.get(target.title.replace("Title: ", ""));
+
+                if (pm == null) {
+                    for (Map.Entry<String, PendingMarket> entry : pendingMarkets.entrySet()) {
+                        String key = entry.getKey();
+                        if (key.contains(target.title) || target.title.contains(key)) {
+                            pm = entry.getValue();
+                            break;
+                        }
+                    }
+                }
+
+                if (pm != null) {
+                    String cityName = target.city.replaceAll("\\s+", "_");
+                    String marketUrl = "https://polymarket.com/event/" + pm.eventSlug;
+                    String humanReadableDate = new SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US)
+                            .format(new Date(target.deadline));
+
+                    String alert = String.format(
+                            "New Polymarket market detected!\n" +
+                                    "Location: %s\n" +
+                                    "Coordinates: %s, %s\n" +
+                                    "Deadline: **%s**\n" +
+                                    "[Event link](%s)\n\n" +
+                                    "To add it to radar, send this command:\n" +
+                                    "`/add %s %s %s %s %d`",
+                            cityName, target.lat, target.lon, humanReadableDate, marketUrl,
+                            cityName, target.lat, target.lon, pm.yesTokenId, target.deadline
+                    );
+                    telegram.sendAlertToAll(alert);
+                    knownMarkets.add(pm.marketId);
+                }
+            }
+
+            pendingMarkets.values().forEach(pm -> knownMarkets.add(pm.marketId));
+
         } catch (Exception e) {
-            System.err.println("Polymarket scan error: " + e.getMessage());
+            log.error("Polymarket scan error", e);
         }
     }
 }
