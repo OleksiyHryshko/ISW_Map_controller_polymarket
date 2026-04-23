@@ -1,0 +1,13 @@
+spring.application.name=filterbot
+telegram.api.id=${TELEGRAM_API_ID}
+telegram.api.hash=${TELEGRAM_API_HASH}
+logging.level.it.tdlight.TDLight=WARN
+chatid=${CHAT_ID}
+botapi=${BOT_API}
+gemini.api.key=${GEMINI_API_KEY}
+polymarkets.api.URL=https://gamma-api.polymarket.com
+
+# Google Sheets Configuration
+# Set GOOGLE_SHEETS_SPREADSHEET_ID environment variable or add to application.properties
+google.sheets.credentials=classpath:google-credentials.json
+google.sheets.spreadsheet.id=${GOOGLE_SHEETS_SPREADSHEET_ID}
