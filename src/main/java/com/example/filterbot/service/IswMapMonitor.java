@@ -75,7 +75,7 @@ public class IswMapMonitor {
                 boolean isOccupied = false;
                 String occupiedPolygonId = "";
 
-                outer:
+                featureLoop:
                 for (JsonNode feature : features) {
                     JsonNode geometry = feature.get("geometry");
                     if (geometry == null || !geometry.has("rings")) continue;
@@ -92,7 +92,7 @@ public class IswMapMonitor {
                         if (polygon.intersects(targetPoint)) {
                             isOccupied = true;
                             occupiedPolygonId = feature.path("attributes").path("OBJECTID").asText();
-                            break outer;
+                            break featureLoop;
                         }
                     }
                 }
