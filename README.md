@@ -199,5 +199,3 @@ This project is provided as-is for educational and portfolio purposes.
 
 ---
 
-**Note**: This is a portfolio project demonstrating Java/Spring Boot competencies for internship applications. The codebase emphasizes clean architecture, proper API integration, and secure credential handling.
-
